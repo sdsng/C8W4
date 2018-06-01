@@ -1,0 +1,215 @@
+Prediction Assignment Writeup
+===
+### Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+### Goal of Project
+The goal of this project will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, to predict the manner in which they did the exercise. This is the "classe" variable in the training set. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data Sources
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv    
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### Report Content 
+This report describes how the model was built, how cross validation was used, the expected out of sample error, and reasons for choices made. The prediction model is also used to predict 20 different test cases. 
+
+### Preliminary Work
+**Understanding the Data**
+
+We explore the "classe" variable in the training set. Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions (Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.):
+
+- Class A: exactly according to the specification 
+- Class B: throwing the elbows to the front 
+- Class C: lifting the dumbbell only halfway 
+- Class D: lowering the dumbbell only halfway 
+- Class E: throwing the hips to the front 
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz5H9tDLZig
+
+Note that data has below structure:     
+str(trainingData) #'data.frame': 19622 obs. of  160 variables       
+str(testingData) #'data.frame': 20 obs. of  160 variables
+
+**Building the Model**
+
+Prediction evaluations will be based on maximizing the accuracy and minimizing the out-of-sample error. All other available variables after cleaning will be used for prediction. Two models will be tested using decision tree and random forest algorithms. The model with the highest accuracy will be chosen as our final model.
+
+**Cross-validation**
+
+Cross-validation will be performed by subsampling our training dataset randomly without replacement into 2 subsamples: subTraining (75% of the original training data) and subTesting (25%). Our models will be fitted on the subTraining, and tested on subTesting. Once the most accurate model is chosen, it will be tested on the original testing data.
+
+**Expected Out-of-Sample Error**
+
+The expected out-of-sample error will correspond to the quantity: 1-accuracy in the cross-validation data.        
+Accuracy is the proportion of (correct classified observation/the total sample in the subTesting).      
+Expected accuracy is the expected accuracy in the out-of-sample dataset (i.e. original testing dataset).        
+Thus, the expected value of the out-of-sample error will correspond to (the expected number of misclassified observations/total observations in testing dataset), which is the quantity: 1-accuracy found from the cross-validation dataset.
+
+**Choices and Reasons**
+
+Our outcome variable “classe” is an unordered factor variable. Thus, we can choose our error type as 1-accuracy. We have a large sample size with N = 19622 in the training dataset. This allow us to divide our training sample into subTraining and subTesting to allow cross-validation. Features with all missing values will be discarded as well as features that are irrelevant. All other features will be kept as relevant variables.
+
+Decision tree and random forest algorithms are known for their ability of detecting the features that are important for classification. Feature selection is inherent, so it is not so necessary at the data preparation phase. Thus, there won’t be any feature selection section in this report.
+
+**Reproducibility**
+
+Installing packages, loading libraries, and setting the overall seed for reproduceability:
+
+```{r, results='hide'}
+
+library(lattice); library(ggplot2); library(caret)
+library(randomForest) # Random forest for classification and regression
+library(rpart) # Regressive Partitioning and Regression trees
+library(rpart.plot) # Decision Tree plot
+library(e1071) # Confusion Matrix model
+
+set.seed(789)
+
+```
+
+### Pre-Processing
+
+**Loading and Exploring Data**
+
+Download and read CSV files, explore training and testing datasets
+```{r, results = 'hide'}
+
+trainingFileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(trainingFileUrl, "TrainingFile")
+
+testingFileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(testingFileUrl, "TestingFile")
+
+trainingData <- read.csv("TrainingFile", na.strings=c("NA","#DIV/0!", ""))
+testingData <- read.csv("TestingFile", na.strings=c("NA","#DIV/0!", "")) # Only used with the final accurate model
+
+str(trainingData) # 'data.frame': 19622 obs. of 160 variables
+str(testingData) # 'data.frame': 20 obs. of 160 variables
+
+```
+
+**Cleaning Data** 
+
+Delete columns with all missing values  
+Remove irrelevant variables
+
+```{r, results = 'hide'}
+
+trainingData <- trainingData[,colSums(is.na(trainingData)) == 0]
+testingData <- testingData[,colSums(is.na(testingData)) == 0]
+
+# We can delete these variables (columns 1 to 7): user_name, raw_timestamp_part_1, raw_timestamp_part_,2 cvtd_timestamp, new_window, and num_window
+trainingData <- trainingData[,-c(1:7)]
+testingData <- testingData[,-c(1:7)]
+
+# Check cleaned datasets
+str(trainingData) # 'data.frame': 19622 obs. of 53 variables
+str(testingData) # 'data.frame': 20 obs. of 53 variables:
+
+```
+
+**Partitioning the Training Dataset**
+
+This allows cross-validation.   
+Partition the original training dataset such that 75% subTraining and the remaining 25% to subTesting.
+
+```{r}
+
+inTrain <- createDataPartition(y = trainingData$classe, p = 0.75, list = FALSE) 
+subTrainingData <- trainingData[inTrain, ] # 14718 x 53
+subTestingData <- trainingData[-inTrain, ] # 4904 x 53
+
+```
+
+**Plot of Classe Levels (Optional)**
+
+The variable “classe” contains 5 levels: A, B, C, D and E.      
+A plot of the outcome variable will allow us to see the frequency of each levels in the subTrainingData and compare one another. 
+
+```{r, echo=FALSE}
+
+plot(subTrainingData$classe, 
+     col = "light green", 
+     main = "Classe within subTrainingData", 
+     xlab = "Classe", 
+     ylab = "Frequency")
+
+```
+
+We see that each classe frequency is within the same order of magnitude of each other. Level A is the most frequent while level D is the least frequent.
+
+### Prediction Methods
+
+**Prediction Model 1: Decision Trees**
+
+```{r}
+
+# Fit model on subTrainingData...
+
+model1 <- rpart(classe ~ ., data = subTrainingData, method = "class")
+
+rpart.plot(model1, main = "Classification Tree", extra = 102, under = TRUE, faclen = 0)
+
+# ...predict with subTestingData.
+
+prediction1 <- predict(model1, subTestingData, type = "class")
+
+confusionMatrix(prediction1, subTestingData$classe)
+
+```
+
+For Model 1: Decision Trees:    
+Accuracy = 0.7463       
+95% CI : (0.7339, 0.7585)
+
+**Prediction Model 2: Random Forest**
+
+```{r}
+
+# Fit model on subTrainingData...
+model2 <- randomForest(classe ~. , data = subTrainingData, method = "class")
+
+# ...predict with subTestingData.
+prediction2 <- predict(model2, subTestingData, type = "class")
+
+confusionMatrix(prediction2, subTestingData$classe)
+
+```
+
+For Model 2: Random Forest:     
+Accuracy : 0.9965       
+95% CI : (0.9945, 0.998)
+
+*Random Forest algorithm performed better than Decision Trees.*
+
+**Apply Chosen Model 2: Random Forest, on Testing Dataset**
+
+```{r}
+
+predictfinal <- predict(model2, testingData, type = "class")
+predictfinal
+
+# Write files for submission
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file = filename, 
+                quote = FALSE, 
+                row.names = FALSE, 
+                col.names = FALSE)
+  }
+}
+
+pml_write_files(predictfinal)
+
+```
+
+
+
+
+
